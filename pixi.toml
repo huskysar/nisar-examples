@@ -1,0 +1,22 @@
+[workspace]
+authors = ["Scott Henderson <3924836+scottyhq@users.noreply.github.com>"]
+channels = ["conda-forge"]
+name = "nisar-examples"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+rioxarray = ">=0.22.0,<0.23"
+ipython = ">=9.12.0,<10"
+cartopy = ">=0.25.0,<0.26"
+asf_search = ">=12.0.7,<13"
+geopandas = ">=1.1.3,<2"
+ipykernel = ">=7.2.0,<8"
+xvec = ">=0.5.2,<0.6"
+h5netcdf = ">=1.8.1,<2"
+libgdal-hdf5 = ">=3.12.3,<4"
+libgdal-netcdf = ">=3.12.3,<4"
+contextily = ">=1.7.0,<2"
+matplotlib-scalebar = ">=0.9.0,<0.10"
