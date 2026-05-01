@@ -53,12 +53,20 @@ https://hub.cryointhecloud.com
 - 50 GB scratch space
 - SSH / VSCode remote access
 
-## Connecting programmatically via terminal + vscode remote ssh
+### EarthScope Geolab
 
+https://www.earthscope.org/data/geolab/
+
+- 50GB of available storage in their home directory
+- home directory (jovyan) will be deleted after 6 months of inactivity
+- in AWS us-east-2 (location of S3 buckets with seismic & GPS data)
+
+## Connecting programmatically via terminal + vscode remote ssh
 
 **First follow these docs!** https://docs.openveda.cloud/user-guide/scientific-computing/ssh.html
 
-**NOTE: unfortunately the default cryocloud image doesn't work with ssh currently, so you need to specify a custom image**
+**NOTE:** unfortunately the default CryoCloud image doesn't work with ssh currently, so you need to specify a custom image** The docker image must have a working version of `jupyter-sshd-proxy` installed.
+
 
 ```bash
 export JHUB_URL=https://hub.cryointhecloud.com
@@ -106,6 +114,8 @@ code --remote ssh-remote+hub.cryointhecloud.com /home/jovyan
 
 ### Connecting to NASA VEDA via terminal + vscode
 
+NOTE: fancy jhub profile forms differ, so curl commands differ from above
+
 The other resource options available are mem_2_gb, mem_4_gb, mem_7_gb, mem_29_gb, mem_60_gb, and mem_119_gb
 
 ```bash
@@ -114,8 +124,15 @@ export JHUB_URL=https://hub.openveda.cloud
 export JHUB_TOKEN=XXXXXX
 export JHUB_USER=scottyhq
 #export JHUB_IMAGE=01-modify-pangeo # built-in 'named images'
-export JHUB_IMAGE=quay.io/pangeo/base-notebook:2026.04.29
-export JHUB_VM=mem_15_gb
+#export JHUB_IMAGE=quay.io/pangeo/base-notebook:2026.04.29
+export JHUB_VM=mem_29_gb
+
+# Launch with default image
+curl -X POST \
+  $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
+  -H "Authorization: token $JHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"profile":"choose-your-environment-and-resources","image":"01-modify-pangeo","resource_allocation":"%s"}' $JHUB_VM)"
 
 # launch server w/ custom image (NOTE: form changes a bit with image--unlisted-choice)
 curl -X POST \
@@ -133,9 +150,103 @@ curl -s \
 # Launch local vscode with remote ssh connection to VEDA
 code --remote ssh-remote+hub.openveda.cloud /home/jovyan
 
-
 # Stop server
 curl -X DELETE \
   $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
   -H "Authorization: token $JHUB_TOKEN"
+```
+
+
+## Pixi environments
+
+The following pixi config will install packages to `/tmp` in order to not bloat your limited home directory. `/tmp` is also a faster disk than the NFS-mounted home directory, so performance should be faster:
+
+`~/.pixi/config.toml`:
+```
+detached-environments = "/tmp/pixi"
+```
+
+**NOTE:**: it seems for the pixi kernel to be detected for jupyter notebooks you must select `File -> Open Folder` and choose your repo folder. Then the automatic kernel detection finds the environments in `.pixi/envs`. If you start ing `/home/jovyan` and navigate to a notebook in a subfolder it is not found... Possible solutions here https://github.com/renan-r-santos/pixi-code
+
+
+## ~/.bashrc and credentials
+
+After a bit of troubleshooting with Claude we came up with this ~/.bashrc to get the same AWS credentials in a SSH terminal as you do in JupyterLab browser environment (granting you access to S3 buckets):
+
+```bash
+# Colors and prompt customization
+# https://unix.stackexchange.com/questions/148/colorizing-your-terminal-and-shell-environment
+PS1='\e[34;1m\u@\h: \e[36m\W\e[0m\$ '
+
+#export LS_COLORS='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33'
+LS_COLORS=$LS_COLORS:'di=1;35:' ; export LS_COLORS
+export LS_OPTIONS='--color=auto'
+alias ls='ls $LS_OPTIONS'
+
+# Put pixi executable in the path
+export PATH="/home/jovyan/.pixi/bin:$PATH"
+
+# === VEDA JupyterHub IRSA credentials (injected at pod start, not in SSH sessions) ===
+# Read AWS_ROLE_ARN and AWS_WEB_IDENTITY_TOKEN_FILE from PID 1's environment
+# so botocore can call sts:AssumeRoleWithWebIdentity and get the nasa-veda-prod role.
+_read_proc1_var() { cat /proc/1/environ 2>/dev/null | tr '\0' '\n' | grep "^$1=" | cut -d= -f2-; }
+export AWS_ROLE_ARN="$(_read_proc1_var AWS_ROLE_ARN)"
+export AWS_WEB_IDENTITY_TOKEN_FILE="$(_read_proc1_var AWS_WEB_IDENTITY_TOKEN_FILE)"
+export AWS_DEFAULT_REGION="$(_read_proc1_var AWS_DEFAULT_REGION)"
+export AWS_REGION="$(_read_proc1_var AWS_REGION)"
+export AWS_STS_REGIONAL_ENDPOINTS="$(_read_proc1_var AWS_STS_REGIONAL_ENDPOINTS)"
+unset -f _read_proc1_var
+# === end VEDA IRSA ===
+
+
+# Earthdata Login Token (expires 2026-06-03T18:23:02Z)
+export EARTHDATA_TOKEN="XXXXXXXX"
+```
+
+
+## Jupyter Kernels
+
+Jupyter Notebook kernels do not have access to ~/.bashrc environment variables apparently, so you can create a startup script that sources ~/.bashrc any time you launch a kernel:
+
+`~/.ipython/profile_default/startup/00-env.py`:
+```python
+"""
+Load environment variables from ~/.bashrc into every Jupyter kernel at startup.
+
+~/.bashrc is only sourced for interactive bash shells, not by the Jupyter kernel
+process (which is spawned directly by JupyterHub without going through a shell).
+This startup script bridges that gap.
+
+On VEDA JupyterHub the IRSA vars (AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE) are
+set in PID 1's environment and picked up by the ~/.bashrc snippet we added.
+By sourcing ~/.bashrc here, botocore can then use AssumeRoleWithWebIdentity to
+get the nasa-veda-prod role credentials automatically.
+
+To add a secret, just `export MY_VAR=value` in ~/.bashrc as normal.
+"""
+import os
+import subprocess
+
+result = subprocess.run(
+    ["bash", "-i", "-c", "export -p"],
+    capture_output=True,
+    text=True,
+)
+
+for line in result.stdout.splitlines():
+    # Lines look like: declare -x KEY="value"  or  export KEY="value"
+    if not (line.startswith("declare -x ") or line.startswith("export ")):
+        continue
+    line = line.removeprefix("declare -x ").removeprefix("export ")
+    if "=" not in line:
+        continue
+    key, _, val = line.partition("=")
+    key = key.strip()
+    # Strip surrounding quotes added by `export -p`
+    val = val.strip()
+    if val.startswith('"') and val.endswith('"'):
+        val = val[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    # Don't override vars already set in the environment (e.g. K8s-injected vars)
+    if key and val and key not in os.environ:
+        os.environ[key] = val
 ```
