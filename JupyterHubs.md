@@ -16,9 +16,9 @@ Further below are instructions for connecting programmatically via terminal + vs
 | **Max CPU** | 4 | 15 | 15 |
 | **GPU** | ❌ | ✅ NVIDIA Tesla T4 (16 GB) | ❌ |
 | **Home Storage** | 500 GB EBS | 10 GB NFS | 10 GB NFS |
-| **Scratch Storage** | — | 50 GB | 50 GB |
-| **S3 Scratch Bucket** | ❌ | ✅ (not persistent) | ✅ (not persistent) |
-| **Storage Expiry** | Deleted after 30 days inactivity | — | — |
+| **Home Storage Expiry** | Deleted after 30 days inactivity | — | — |
+| **Scratch Storage** | — | /tmp/ (50 GB) | /tmp/ (50 GB) |
+| **S3 Scratch Bucket** | ❌ | ✅ s3://nasa-cryo-scratch/ (7 days) | ✅ s3://nasa-veda-scratch (7 days) |
 | **SSH / VSCode Remote** | ❌ | ✅  | ✅ |
 
 ### OpenScience Lab
@@ -67,9 +67,11 @@ https://www.earthscope.org/data/geolab/
 
 **NOTE:** unfortunately the default CryoCloud image doesn't work with ssh currently, so you need to specify a custom image** The docker image must have a working version of `jupyter-sshd-proxy` installed.
 
+## CryoCloud
 
+### Set up environment variables
 ```bash
-export JHUB_URL=https://hub.cryointhecloud.com
+export JHUB_URL=hub.cryointhecloud.com
 export JHUB_TOKEN=XXXXXXXXX
 export JHUB_USER=scottyhq
 #export JHUB_IMAGE=quay.io/pangeo/base-notebook:2026.04.29
@@ -81,76 +83,99 @@ export JHUB_IMAGE=public.ecr.aws/nasa-veda/pangeo-notebook-veda-image:2025.12.30
 export JHUB_VM=mem_4_gb
 ```
 
+### Launch default env
 ```bash
 # Launch with default image and resources
 curl -X POST \
-  $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
+  https://$JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
   -H "Authorization: token $JHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(printf '{"profile":"cpu-only","image":"01-python","resource_allocation":"%s"}' $JHUB_VM)"
+```
 
-# Launch with custom image and resources:
+### Launch with custom image and resources:
+```bash
 curl -X POST \
-  $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
+  https://$JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
   -H "Authorization: token $JHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(printf '{"profile":"cpu-only","image":"unlisted_choice","image--unlisted-choice":"%s","resource_allocation":"%s"}' $JHUB_IMAGE $JHUB_VM)"
+```
 
-# GPU instance
+### GPU instance
+```bash
 curl -X POST \
-  $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
+  https://$JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
   -H "Authorization: token $JHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(printf '{"profile":"gpu","image":"pytorch"}')"
-
-# Check launch status
-curl -s \
-  $JHUB_URL/hub/api/users/$JHUB_USER \
-  -H "Authorization: token $JHUB_TOKEN" | jq
-
-# Connect via vscode remote ssh
-code --remote ssh-remote+hub.cryointhecloud.com /home/jovyan
 ```
 
-### Connecting to NASA VEDA via terminal + vscode
+### Check launch status
+```bash
+curl -s \
+  https://$JHUB_URL/hub/api/users/$JHUB_USER \
+  -H "Authorization: token $JHUB_TOKEN" | jq
+
+```
+
+### Connect via vscode remote ssh
+```
+code --remote ssh-remote+$JHUB_USER /home/jovyan
+```
+
+## NASA VEDA Hub
 
 NOTE: fancy jhub profile forms differ, so curl commands differ from above
 
 The other resource options available are mem_2_gb, mem_4_gb, mem_7_gb, mem_29_gb, mem_60_gb, and mem_119_gb
 
+### Launch default env
 ```bash
 # setup
-export JHUB_URL=https://hub.openveda.cloud
+export JHUB_URL=hub.openveda.cloud
 export JHUB_TOKEN=XXXXXX
 export JHUB_USER=scottyhq
 #export JHUB_IMAGE=01-modify-pangeo # built-in 'named images'
 #export JHUB_IMAGE=quay.io/pangeo/base-notebook:2026.04.29
 export JHUB_VM=mem_29_gb
+```
 
-# Launch with default image
+### Launch with default image
+```bash
 curl -X POST \
-  $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
+  https://$JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
   -H "Authorization: token $JHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(printf '{"profile":"choose-your-environment-and-resources","image":"01-modify-pangeo","resource_allocation":"%s"}' $JHUB_VM)"
+```
 
-# launch server w/ custom image (NOTE: form changes a bit with image--unlisted-choice)
+### Launch server w/ custom image 
+
+(NOTE: form changes a bit from CryoCloud so curl commands are different
+
+```bash
 curl -X POST \
-  $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
+  https://$JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
   -H "Authorization: token $JHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(printf '{"profile":"choose-your-environment-and-resources","image":"unlisted_choice","image--unlisted-choice":"%s","resource_allocation":"%s"}' "$JHUB_IMAGE" "$JHUB_VM")"
+```
 
-# Check server status
+### Check server status
+```bash
 curl -s \
-  $JHUB_URL/hub/api/users/$JHUB_USER \
+  https://$JHUB_URL/hub/api/users/$JHUB_USER \
   -H "Authorization: token $JHUB_TOKEN" | jq
+```
 
+### Launch local vscode with remote ssh connection to VEDA
+```bash
+code --remote ssh-remote+$JHUB_URL /home/jovyan
+```
 
-# Launch local vscode with remote ssh connection to VEDA
-code --remote ssh-remote+hub.openveda.cloud /home/jovyan
-
-# Stop server
+### Stop server
+```bash
 curl -X DELETE \
   $JHUB_URL/hub/api/users/$JHUB_USER/servers/ \
   -H "Authorization: token $JHUB_TOKEN"
